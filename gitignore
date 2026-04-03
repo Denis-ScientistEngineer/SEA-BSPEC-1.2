@@ -1,0 +1,22 @@
+# Julia artifacts and environment
+Manifest.toml
+*.jl.cov
+*.jl.*.cov
+*.jl.mem
+/docs/build/
+
+# OS
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# Editor
+.vscode/
+.idea/
+*.swp
+*~
+
+# Compiled outputs
+*.o
+*.so
+*.dll
