@@ -46,7 +46,9 @@ _state.initialized    = true
 _state.solvers_loaded = [:electromagnetics, :classical_mechanics]
 
 # ── 4. CSS — dark scientific theme, mobile-first ─────────────────
-const STYLES = Bonito.CSS("""
+# Bonito.CSS() doesn't accept a plain string — inject via DOM.style() instead.
+# STYLES_STR holds the raw CSS; it's wrapped in DOM.style() inside build_page.
+const STYLES_STR = """
   /* ── Reset & base ─────────────────────────────────────────── */
   *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
 
@@ -282,7 +284,7 @@ const STYLES = Bonito.CSS("""
     .cmd-input    { min-height: 56px; font-size: 14px; }
     .btn          { padding: 10px 14px; font-size: 14px; }
   }
-""")
+"""
 
 # ── 5. Text builders ─────────────────────────────────────────────
 
@@ -431,7 +433,7 @@ function build_page(session::Session)
     """
 
     return Bonito.DOM.div(
-        STYLES,
+        Bonito.DOM.style(STYLES_STR),
         Bonito.DOM.div(class="shell",
             # ── Header ──────────────────────────────────────────
             Bonito.DOM.div(class="topbar",
