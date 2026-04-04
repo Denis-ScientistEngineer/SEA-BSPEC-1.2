@@ -6,7 +6,6 @@ version = "0.1.0"
 [deps]
 GLMakie       = "e9467ef8-e4e7-5192-8a1a-b1aee30e663a"
 HTTP          = "cd3eb016-35fb-5094-929b-558a96fad6f3"
-JSON3         = "0f8b85d8-7e73-4b2e-b677-b35c05c7a19d"
 Revise        = "295af30f-e4ad-537b-8983-00126c2a3abe"
 LinearAlgebra = "37e2e46d-f89d-539d-b4ee-838fcccc9c8e"
 Printf        = "de0858da-6303-5e67-8744-51eddeeeb8d3"
