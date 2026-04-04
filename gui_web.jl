@@ -35,9 +35,72 @@ includet("solvers/electromagnetics.jl")
 includet("solvers/classical_mechanics.jl")
 
 # 鈹€鈹€ 2. Packages 鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€
+# Only HTTP.jl 鈥� no JSON3, no Bonito, no external JSON library.
+# Our payloads are small and fixed-shape so we handle JSON ourselves.
 using HTTP
-using JSON3
 using Printf
+
+# 鈹€鈹€ 2b. Minimal JSON helpers (no external dependency) 鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€
+
+"""Escape a string for safe embedding inside a JSON string value."""
+function _json_esc(s::AbstractString)::String
+    s = replace(s, "\\" => "\\\\")
+    s = replace(s, "\"" => "\\\"")
+    s = replace(s, "\n" => "\\n")
+    s = replace(s, "\r" => "\\r")
+    s = replace(s, "\t" => "\\t")
+    return s
+end
+
+"""Serialise a result-row Dict to a JSON object string."""
+function _row_to_json(row::Dict)::String
+    k = _json_esc(row["key"])
+    v = _json_esc(row["value"])
+    u = _json_esc(row["unit"])
+    """{"key":"$k","value":"$v","unit":"$u"}"""
+end
+
+"""Serialise the full solver result to a JSON string."""
+function result_to_json(d::Dict)::String
+    success = d["success"] ? "true" : "false"
+    command = _json_esc(d["command"])
+    solver  = _json_esc(d["solver"])
+    message = _json_esc(d["message"])
+    rows    = join([_row_to_json(r) for r in d["rows"]], ",")
+    """{"success":$success,"command":"$command","solver":"$solver","message":"$message","rows":[$rows]}"""
+end
+
+"""Parse the query string out of a JSON body like {"query":"..."}."""
+function _parse_query(body::String)::String
+    # Simple extraction 鈥� find "query":"..." pattern
+    m = match(r"\"query\"\s*:\s*\"((?:[^\"\\]|\\.)*)\"", body)
+    isnothing(m) && return ""
+    # Unescape basic JSON escapes
+    s = m.captures[1]
+    s = replace(s, "\\n"  => "\n")
+    s = replace(s, "\\t"  => "\t")
+    s = replace(s, "\\\"" => "\"")
+    s = replace(s, "\\\\" => "\\")
+    return s
+end
+
+"""Build a JSON registry response: {"domain":["cmd1","cmd2"],...}"""
+function registry_to_json()::String
+    domains = Dict{String, Vector{String}}()
+    for (cmd, entry) in SOLVER_REGISTRY
+        d = string(entry.domain)
+        push!(get!(domains, d, String[]), string(cmd))
+    end
+    for v in values(domains)
+        sort!(v)
+    end
+    pairs = String[]
+    for (dom, cmds) in sort(collect(domains), by = x -> x[1])
+        cmd_list = join(["\"$(c)\"" for c in cmds], ",")
+        push!(pairs, "\"$(dom)\":[$cmd_list]")
+    end
+    "{" * join(pairs, ",") * "}"
+end
 
 # 鈹€鈹€ 3. Engine init 鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€
 const _state = EngineState()
@@ -55,9 +118,9 @@ function _fmtv(v)::String
     return string(v)
 end
 
-"""Convert SolverResult 鈫� plain Dict so JSON3 can serialise it."""
+"""Convert SolverResult 鈫� plain Dict ready for result_to_json()."""
 function result_to_dict(r::SolverResult)::Dict
-    rows = []
+    rows = Dict[]
     for (k, v) in sort(collect(r.outputs), by = x -> string(x[1]))
         push!(rows, Dict(
             "key"   => string(k),
@@ -490,51 +553,43 @@ end
 """Run a query through the engine, return JSON."""
 function handle_solve(req::HTTP.Request)
     try
-        body  = JSON3.read(String(req.body))
-        query = get(body, :query, "")
+        query = _parse_query(String(req.body))
 
-        isempty(strip(query)) && return HTTP.Response(400,
-            ["Content-Type" => "application/json"],
-            JSON3.write(Dict("success" => false,
-                             "command" => "unknown",
-                             "solver"  => "server",
-                             "message" => "Empty query.",
-                             "rows"    => []))
-        )
+        if isempty(strip(query))
+            return HTTP.Response(400,
+                ["Content-Type" => "application/json"],
+                result_to_json(Dict("success" => false,
+                                    "command" => "unknown",
+                                    "solver"  => "server",
+                                    "message" => "Empty query.",
+                                    "rows"    => Dict[]))
+            )
+        end
 
-        res  = process(String(query), _state)
+        res  = process(query, _state)
         data = result_to_dict(res)
 
         HTTP.Response(200,
             ["Content-Type" => "application/json"],
-            JSON3.write(data)
+            result_to_json(data)
         )
     catch e
         HTTP.Response(500,
             ["Content-Type" => "application/json"],
-            JSON3.write(Dict("success" => false,
-                             "command" => "unknown",
-                             "solver"  => "server",
-                             "message" => sprint(showerror, e),
-                             "rows"    => []))
+            result_to_json(Dict("success" => false,
+                                "command" => "unknown",
+                                "solver"  => "server",
+                                "message" => sprint(showerror, e),
+                                "rows"    => Dict[]))
         )
     end
 end
 
 """Return the solver registry as JSON for the browser to render."""
 function handle_registry(req::HTTP.Request)
-    domains = Dict{String, Vector{String}}()
-    for (cmd, entry) in SOLVER_REGISTRY
-        d = string(entry.domain)
-        push!(get!(domains, d, String[]), string(cmd))
-    end
-    # Sort commands within each domain
-    for v in values(domains)
-        sort!(v)
-    end
     HTTP.Response(200,
         ["Content-Type" => "application/json"],
-        JSON3.write(domains)
+        registry_to_json()
     )
 end
 
