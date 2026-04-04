@@ -19,8 +19,9 @@
 #   or Enter key. Julia processes it through the normal engine
 #   pipeline and returns a JSON SolverResult.
 #
-# Run  : julia gui_web.jl
+# Run  : julia gui_web.jl          (no --project flag needed)
 # Open : http://localhost:8050
+# Setup: run  julia install.jl  once before first use
 # ================================================================
 
 # 鈹€鈹€ 0. Revise 鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€
