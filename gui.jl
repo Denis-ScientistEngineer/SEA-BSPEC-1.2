@@ -202,202 +202,95 @@ function run_query!(text::String)
     status_text[] = "  ● Ready  │  Solvers: $n  │  Queries: $q  │  Errors: $e  │  Last: $l"
 end
 
-# ── 7. FIGURE & LAYOUT ───────────────────────────────────────────
+# ── 7. FIGURE & ROOT LAYOUT ─────────────────────────────────────
 
 GLMakie.activate!(title = "B-SPEC Physical Engine  v0.1", focus_on_show = true)
 set_theme!(theme_dark())
 
 fig = Figure(
     backgroundcolor = C.bg,
-    size            = (1340, 900),
+    size = (1340, 900),
 )
 
-# ── Row sizing: header(52) | main(fills) | statusbar(28)
-rowsize!(fig.layout, 1, Fixed(52))
-rowsize!(fig.layout, 3, Fixed(28))
-rowgap!(fig.layout, 4)
+# ══ ROOT GRID (EXPLICIT STRUCTURE) ═══════════════════════════════
+root = fig.layout
+
+# Define rows FIRST (this avoids your error entirely)
+rowsize!(root, 1, Fixed(52))     # Header
+rowsize!(root, 2, Auto())        # Main content (flex)
+rowsize!(root, 3, Fixed(28))     # Status bar
+
+rowgap!(root, 6)
+
+# Define columns
+colsize!(root, 1, Auto())
 
 # ══ HEADER ═══════════════════════════════════════════════════════
-Box(fig[1, 1:2], color = C.panel, strokewidth = 0)
-hdr = fig[1, 1:2] = GridLayout()
-colgap!(hdr, 1, 20)
+header = root[1, 1] = GridLayout()
+Box(header[1, 1], color = C.panel, strokewidth = 0)
 
-Label(hdr[1, 1],
+colgap!(header, 20)
+
+Label(header[1, 1],
     "  ⬡  B - S P E C   P H Y S I C A L   E N G I N E",
-    fontsize   = 18,
-    font       = "Courier New",
-    color      = C.accent,
-    halign     = :left,
-    tellwidth  = false)
-
-Label(hdr[1, 2],
-    "Scientific Computing Solver Interface  ·  v0.1  ",
-    fontsize  = 12,
-    color     = C.text_dim,
-    halign    = :right,
+    fontsize = 18,
+    font = "Courier New",
+    color = C.accent,
+    halign = :left,
     tellwidth = false)
 
-# ══ MAIN AREA ════════════════════════════════════════════════════
-main = fig[2, 1:2] = GridLayout()
-colsize!(main, 1, Fixed(420))
-colgap!(main, 1, 6)
+Label(header[1, 2],
+    "Scientific Computing Solver Interface  ·  v0.1  ",
+    fontsize = 12,
+    color = C.text_dim,
+    halign = :right,
+    tellwidth = false)
+
+# ══ MAIN AREA (SPLIT: LEFT / RIGHT) ══════════════════════════════
+main = root[2, 1] = GridLayout()
+
+colsize!(main, 1, Fixed(420))   # Left panel fixed
+colsize!(main, 2, Auto())       # Right panel flexible
+colgap!(main, 6)
 
 # ══ LEFT PANEL ═══════════════════════════════════════════════════
-Box(main[1, 1], color = C.panel, strokewidth = 1, strokecolor = C.border)
 left = main[1, 1] = GridLayout()
-rowgap!(left, 5)
+Box(left[1, 1], color = C.panel, strokewidth = 1, strokecolor = C.border)
 
-# ─ Section: Command Input ─────────────────────────────────────────
-Label(left[1, 1],
-    "  COMMAND INPUT",
-    fontsize  = 11,
-    font      = "Courier New",
-    color     = C.accent,
-    halign    = :left,
-    tellwidth = false)
-rowsize!(left, 1, Fixed(28))
+rowgap!(left, 6)
 
-# Textbox
-tb = Textbox(left[2, 1],
-    placeholder        = "get electric_field charge=1e-9 source=[0,0,0] ...",
-    stored_string      = committed_input,
-    fontsize           = 13,
-    bordercolor        = C.border,
-    bordercolor_focused = C.accent,
-    textcolor          = C.text,
-    fontfamily         = "monospace")
-rowsize!(left, 2, Fixed(40))
-
-# Button row
-brow = left[3, 1] = GridLayout()
-colgap!(brow, 1, 8)
-
-solve_btn = Button(brow[1, 1],
-    label              = "  SOLVE  ",
-    fontsize           = 13,
-    height             = 36,
-    buttoncolor        = C.btn_solve,
-    buttoncolor_hover  = C.btn_hover,
-    buttoncolor_active = C.accent,
-    labelcolor         = C.text,
-    font               = "Courier New")
-
-clear_btn = Button(brow[1, 2],
-    label              = "  CLEAR  ",
-    fontsize           = 13,
-    height             = 36,
-    buttoncolor        = C.surface,
-    buttoncolor_hover  = C.border,
-    labelcolor         = C.text_dim,
-    font               = "Courier New")
-
-rowsize!(left, 3, Fixed(44))
-
-# ─ Divider ────────────────────────────────────────────────────────
-Label(left[4, 1],
-    "  ──────────────────────────────────────",
-    color = C.border, fontsize = 10, halign = :left, tellwidth = false)
-rowsize!(left, 4, Fixed(16))
-
-# ─ Section: Solver Registry ──────────────────────────────────────
-Label(left[5, 1],
-    "  SOLVER REGISTRY",
-    fontsize = 11, font = "Courier New",
-    color = C.accent, halign = :left, tellwidth = false)
-rowsize!(left, 5, Fixed(26))
-
-Label(left[6, 1],
-    build_registry_text(),
-    fontsize      = 11,
-    font          = "Courier New",
-    color         = C.text_dim,
-    halign        = :left,
-    justification = :left,
-    tellwidth     = false)
-
-# ─ Divider ────────────────────────────────────────────────────────
-Label(left[7, 1],
-    "  ──────────────────────────────────────",
-    color = C.border, fontsize = 10, halign = :left, tellwidth = false)
-rowsize!(left, 7, Fixed(16))
-
-# ─ Section: Format Guide ─────────────────────────────────────────
-Label(left[8, 1],
-    "  FORMAT GUIDE\n" *
-    "  [verb] command  key=value  key=[x,y,z]\n\n" *
-    "  VERBS (optional prefix):\n" *
-    "    get | find | compute | calculate | solve\n\n" *
-    "  SCALARS:   charge=1.5e-9   mass=0.5\n" *
-    "  VECTORS:   position=[0.0,1.0,0.0]\n" *
-    "  NEGATIVE:  q2=-2.0e-9",
-    fontsize      = 11,
-    font          = "Courier New",
-    color         = C.text_dim,
-    halign        = :left,
-    justification = :left,
-    tellwidth     = false)
+# Define left panel row structure
+rowsize!(left, 1, Fixed(28))   # Command title
+rowsize!(left, 2, Fixed(40))   # Textbox
+rowsize!(left, 3, Fixed(44))   # Buttons
+rowsize!(left, 4, Fixed(16))   # Divider
+rowsize!(left, 5, Fixed(26))   # Registry title
+rowsize!(left, 6, Auto())      # Registry body
+rowsize!(left, 7, Fixed(16))   # Divider
+rowsize!(left, 8, Auto())      # Format guide
 
 # ══ RIGHT PANEL ══════════════════════════════════════════════════
-Box(main[1, 2], color = C.panel, strokewidth = 1, strokecolor = C.border)
 right = main[1, 2] = GridLayout()
-rowgap!(right, 5)
+Box(right[1, 1], color = C.panel, strokewidth = 1, strokecolor = C.border)
 
-# ─ Result Header ─────────────────────────────────────────────────
-result_hdr = right[1, 1] = GridLayout()
-colgap!(result_hdr, 1, 10)
+rowgap!(right, 6)
 
-Label(result_hdr[1, 1],
-    "  RESULT",
-    fontsize = 11, font = "Courier New",
-    color = C.accent, halign = :left, tellwidth = false)
-
-rowsize!(right, 1, Fixed(28))
-
-# ─ Result Body ───────────────────────────────────────────────────
-Box(right[2, 1], color = C.surface, strokewidth = 1, strokecolor = C.border)
-
-Label(right[2, 1],
-    result_text,
-    fontsize      = 13,
-    font          = "Courier New",
-    color         = result_color,
-    halign        = :left,
-    justification = :left,
-    valign        = :top,
-    tellwidth     = false,
-    tellheight    = false)
-
-rowsize!(right, 2, Relative(0.60))
-
-# ─ History Header ────────────────────────────────────────────────
-Label(right[3, 1],
-    "  QUERY HISTORY",
-    fontsize = 11, font = "Courier New",
-    color = C.accent, halign = :left, tellwidth = false)
-rowsize!(right, 3, Fixed(28))
-
-# ─ History Body ──────────────────────────────────────────────────
-Box(right[4, 1], color = C.surface, strokewidth = 1, strokecolor = C.border)
-
-Label(right[4, 1],
-    history_text,
-    fontsize      = 12,
-    font          = "Courier New",
-    color         = C.text_dim,
-    halign        = :left,
-    justification = :left,
-    valign        = :top,
-    tellwidth     = false,
-    tellheight    = false)
+# Define right panel rows
+rowsize!(right, 1, Fixed(28))      # Result header
+rowsize!(right, 2, Relative(0.6))  # Result body
+rowsize!(right, 3, Fixed(28))      # History header
+rowsize!(right, 4, Relative(0.4))  # History body
 
 # ══ STATUS BAR ═══════════════════════════════════════════════════
-Box(fig[3, 1:2], color = C.surface, strokewidth = 0)
-Label(fig[3, 1:2],
+status = root[3, 1] = GridLayout()
+Box(status[1, 1], color = C.surface, strokewidth = 0)
+
+Label(status[1, 1],
     status_text,
-    fontsize  = 11,
-    font      = "Courier New",
-    color     = C.text_dim,
-    halign    = :left,
+    fontsize = 11,
+    font = "Courier New",
+    color = C.text_dim,
+    halign = :left,
     tellwidth = false)
 
 # ── 8. EVENT HANDLERS ────────────────────────────────────────────

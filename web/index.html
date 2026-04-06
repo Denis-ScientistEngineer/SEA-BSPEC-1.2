@@ -1,443 +1,140 @@
+<!-- UPDATED index.html with structured UI, tabs, and plotting -->
 <!DOCTYPE html>
 <html lang="en">
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>B-SPEC Physical Engine</title>
+<script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
 <style>
-*, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
-
-body {
-  background: #0C1016;
-  color: #E1E8F1;
-  font-family: 'Courier New', Courier, monospace;
-  font-size: 14px;
-  height: 100dvh;
-  display: flex;
-  flex-direction: column;
-  overflow: hidden;
-}
-
-.topbar {
-  background: #151A21;
-  border-bottom: 1px solid #2A3240;
-  padding: 10px 18px;
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  flex-shrink: 0;
-}
-.topbar-title { color: #53A2FF; font-size: 15px; letter-spacing: 2px; font-weight: bold; }
-.topbar-sub   { color: #606870; font-size: 11px; }
-.pill {
-  background: #1B2129;
-  border: 1px solid #2A3240;
-  color: #53A2FF;
-  font-size: 10px;
-  padding: 2px 8px;
-  border-radius: 12px;
-}
-
-.main { display: flex; flex: 1; overflow: hidden; }
-
-.left-panel {
-  width: 320px;
-  min-width: 320px;
-  background: #151A21;
-  border-right: 1px solid #2A3240;
-  display: flex;
-  flex-direction: column;
-  overflow-y: auto;
-  padding-bottom: 12px;
-}
-
-.right-panel {
-  flex: 1;
-  display: flex;
-  flex-direction: column;
-  overflow: hidden;
-  background: #0F1419;
-}
-
-.sec-label {
-  color: #53A2FF;
-  font-size: 10px;
-  letter-spacing: 2px;
-  padding: 12px 14px 6px;
-  text-transform: uppercase;
-}
-
-.input-wrap { padding: 0 12px 8px; }
-
-textarea#cmd {
-  width: 100%;
-  background: #1B2129;
-  border: 1px solid #2A3240;
-  border-radius: 4px;
-  color: #E1E8F1;
-  font-family: 'Courier New', monospace;
-  font-size: 13px;
-  padding: 10px 12px;
-  outline: none;
-  resize: vertical;
-  min-height: 80px;
-}
-textarea#cmd:focus { border-color: #53A2FF; }
-
-.btn-row { display: flex; gap: 8px; padding: 0 12px 10px; }
-
-button {
-  padding: 9px 16px;
-  border-radius: 4px;
-  font-family: 'Courier New', monospace;
-  font-size: 13px;
-  cursor: pointer;
-  border: none;
-  transition: background 0.15s;
-}
-#solve-btn {
-  background: #2465A8;
-  color: #E1E8F1;
-  flex: 1;
-  letter-spacing: 1px;
-}
-#solve-btn:hover  { background: #3381D1; }
-#solve-btn:active { background: #1A4A80; }
-
-#clear-btn {
-  background: #1B2129;
-  color: #818B98;
-  border: 1px solid #2A3240;
-}
-#clear-btn:hover { background: #252D38; color: #E1E8F1; }
-
-#spinner {
-  display: none;
-  color: #53A2FF;
-  padding: 0 12px 6px;
-  font-size: 11px;
-}
-#spinner.active { display: block; }
-
-hr.divider { border: none; border-top: 1px solid #2A3240; margin: 6px 12px; }
-
-#registry {
-  padding: 4px 14px;
-  font-size: 11.5px;
-  color: #606870;
-  line-height: 1.9;
-  white-space: pre;
-  overflow-x: hidden;
-}
-.reg-domain { color: #53A2FF; }
-
-.guide {
-  padding: 8px 14px 4px;
-  font-size: 11px;
-  color: #505860;
-  line-height: 1.8;
-  border-top: 1px solid #2A3240;
-  white-space: pre;
-}
-.guide b { color: #818B98; }
-
-.result-wrap { flex: 1; overflow-y: auto; padding: 14px 16px; }
-
-#result-box {
-  white-space: pre-wrap;
-  font-size: 13px;
-  line-height: 1.8;
-  font-family: 'Courier New', monospace;
-  color: #506070;
-}
-#result-box.success { color: #3CBD52; }
-#result-box.error   { color: #F44D45; }
-
-.result-table {
-  width: 100%;
-  border-collapse: collapse;
-  font-size: 13px;
-  font-family: 'Courier New', monospace;
-  margin-top: 10px;
-}
-.result-table th {
-  color: #818B98;
-  text-align: left;
-  padding: 2px 16px 6px 0;
-  border-bottom: 1px solid #2A3240;
-  font-weight: normal;
-  font-size: 11px;
-  letter-spacing: 1px;
-}
-.result-table td { padding: 3px 16px 3px 0; vertical-align: top; }
-.td-key  { color: #76BFFF; min-width: 200px; }
-.td-val  { color: #E1E8F1; min-width: 180px; }
-.td-unit { color: #99C794; }
-
-.history-wrap {
-  background: #151A21;
-  border-top: 1px solid #2A3240;
-  padding: 6px 14px 8px;
-  max-height: 150px;
-  overflow-y: auto;
-  flex-shrink: 0;
-}
-.history-label {
-  color: #53A2FF;
-  font-size: 10px;
-  letter-spacing: 2px;
-  padding-bottom: 4px;
-}
-#history-list {
-  font-size: 11.5px;
-  color: #606870;
-  line-height: 1.75;
-  white-space: pre;
-}
-.h-ok  { color: #3CBD52; }
-.h-err { color: #F44D45; }
-
-.statusbar {
-  background: #151A21;
-  border-top: 1px solid #2A3240;
-  padding: 5px 14px;
-  font-size: 11px;
-  color: #606870;
-  flex-shrink: 0;
-  white-space: nowrap;
-  overflow-x: auto;
-}
-#status-dot { color: #3CBD52; }
-
-@media (max-width: 680px) {
-  .main       { flex-direction: column; }
-  .left-panel { width: 100%; min-width: unset; border-right: none;
-                border-bottom: 1px solid #2A3240; max-height: 50vh; }
-  .right-panel { flex: 1; min-height: 0; }
-  .topbar-sub  { display: none; }
-}
+body { background:#0C1016;color:#E1E8F1;font-family:monospace;margin:0;display:flex;flex-direction:column;height:100vh }
+.topbar{padding:10px;background:#151A21;border-bottom:1px solid #2A3240}
+.main{display:flex;flex:1}
+.left{width:320px;background:#151A21;padding:10px;overflow:auto}
+.right{flex:1;display:flex;flex-direction:column}
+.tabs{display:flex;border-bottom:1px solid #2A3240}
+.tab{padding:10px;cursor:pointer}
+.tab.active{color:#53A2FF}
+.panel{display:none;padding:10px;overflow:auto;flex:1}
+.panel.active{display:block}
+input,select{width:100%;margin-bottom:8px;background:#1B2129;border:1px solid #2A3240;color:white;padding:6px}
+button{padding:8px;margin-top:6px;width:100%;background:#2465A8;border:none;color:white;cursor:pointer}
 </style>
 </head>
 <body>
-
-<div class="topbar">
-  <div class="topbar-title">&#9137; &nbsp; B-SPEC &nbsp; PHYSICAL &nbsp; ENGINE</div>
-  <div class="topbar-sub">Scientific Computing Solver Interface</div>
-  <span class="pill">v0.1</span>
-</div>
-
+<div class="topbar">B-SPEC v0.2</div>
 <div class="main">
 
-  <div class="left-panel">
-    <div class="sec-label">Command Input</div>
-    <div class="input-wrap">
-      <textarea id="cmd" rows="4"
-        placeholder="get electric_field charge=1e-9 source=[0,0,0] field_point=[1,0,0]"
-        spellcheck="false" autocorrect="off" autocomplete="off"></textarea>
-    </div>
-    <div class="btn-row">
-      <button id="solve-btn">&#9654; SOLVE</button>
-      <button id="clear-btn">CLEAR</button>
-    </div>
-    <div id="spinner">&#9711; computing...</div>
-    <hr class="divider">
-    <div class="sec-label">Solver Registry</div>
-    <div id="registry">  loading...</div>
-    <div class="guide"><b>FORMAT</b>   [verb] command key=value key=[x,y,z]
-<b>VECTORS</b>  source=[0.0, 0.0, 0.0]
-<b>VERBS</b>    get | find | compute | solve
-<b>TIP</b>      Ctrl+Enter = SOLVE</div>
-  </div>
+<div class="left">
+<h3>Structured Input</h3>
+<select id="solver">
+<option value="electric_field">Electric Field</option>
+<option value="coulomb_force">Coulomb Force</option>
+</select>
+<input id="param1" placeholder="charge / q1">
+<input id="param2" placeholder="q2 / source">
+<input id="param3" placeholder="position / r">
+<button onclick="runStructured()">Run</button>
 
-  <div class="right-panel">
-    <div class="result-wrap">
-      <div style="color:#53A2FF;font-size:10px;letter-spacing:2px;padding-bottom:8px;">RESULT</div>
-      <div id="result-box">  B-SPEC Physical Engine  v0.1
-
-  Type a command and press SOLVE.
-
-  EXAMPLES:
-  get electric_field charge=1e-9 source=[0,0,0] field_point=[1,0,0]
-  get coulomb_force q1=1e-9 q2=-2e-9 r1=[0,0,0] r2=[0.05,0,0]
-  get projectile_motion initial_velocity=50 angle_deg=45 initial_height=0
-  get harmonic_oscillator mass=0.5 spring_constant=200 damping=0.8
-  get gravitational_force m1=5.972e24 m2=7.342e22 distance=3.844e8
-  get elastic_collision m1=2.0 v1=3.0 m2=1.0 v2=0.0</div>
-    </div>
-    <div class="history-wrap">
-      <div class="history-label">QUERY HISTORY</div>
-      <div id="history-list">  No queries yet.</div>
-    </div>
-  </div>
-
+<hr>
+<h3>Command Mode</h3>
+<textarea id="cmd" placeholder="type command..."></textarea>
+<button onclick="runCmd()">Run Command</button>
 </div>
 
-<div class="statusbar">
-  <span id="status-dot">&#9679;</span>&nbsp;
-  <span id="status-text">Ready</span>
+<div class="right">
+<div class="tabs">
+<div class="tab active" onclick="openTab(0)">Result</div>
+<div class="tab" onclick="openTab(1)">Plot</div>
+<div class="tab" onclick="openTab(2)">History</div>
+</div>
+
+<div class="panel active" id="resultPanel"></div>
+<div class="panel" id="plotPanel"><canvas id="chart"></canvas></div>
+<div class="panel" id="historyPanel"></div>
+
+</div>
 </div>
 
 <script>
-var historyLog = [];
-var queryCount = 0;
-var errorCount = 0;
-var lastCmd    = "none";
-var MAX_HIST   = 16;
+let historyLog=[];
+let chart;
 
-var cmdInput   = document.getElementById("cmd");
-var solveBtn   = document.getElementById("solve-btn");
-var clearBtn   = document.getElementById("clear-btn");
-var resultBox  = document.getElementById("result-box");
-var histList   = document.getElementById("history-list");
-var statusText = document.getElementById("status-text");
-var statusDot  = document.getElementById("status-dot");
-var spinner    = document.getElementById("spinner");
-var registry   = document.getElementById("registry");
-
-function loadRegistry() {
-  fetch("/registry")
-    .then(function(r) { return r.json(); })
-    .then(function(data) {
-      var html = "";
-      var domains = Object.keys(data).sort();
-      var i, j, dom, cmds;
-      for (i = 0; i < domains.length; i++) {
-        dom  = domains[i];
-        cmds = data[dom];
-        html += "<span class=\"reg-domain\">  &rsaquo; :" + dom + "</span>\n";
-        for (j = 0; j < cmds.length; j++) {
-          html += "      :" + cmds[j] + "\n";
-        }
-        html += "\n";
-      }
-      registry.innerHTML = html;
-      updateStatus();
-    })
-    .catch(function() {
-      registry.textContent = "  (registry unavailable)";
-    });
+function openTab(i){
+ document.querySelectorAll('.tab').forEach(t=>t.classList.remove('active'));
+ document.querySelectorAll('.panel').forEach(p=>p.classList.remove('active'));
+ document.querySelectorAll('.tab')[i].classList.add('active');
+ document.querySelectorAll('.panel')[i].classList.add('active');
 }
 
-function solve() {
-  var text = cmdInput.value.trim();
-  if (!text) { return; }
-
-  spinner.classList.add("active");
-  solveBtn.disabled     = true;
-  statusDot.style.color = "#E4B02D";
-
-  fetch("/solve", {
-    method  : "POST",
-    headers : { "Content-Type": "application/json" },
-    body    : JSON.stringify({ query: text })
-  })
-  .then(function(resp) { return resp.json(); })
-  .then(function(data) {
-    queryCount++;
-    lastCmd = data.command;
-    if (!data.success) { errorCount++; }
-    renderResult(data);
-    addHistory(text, data.success);
-    updateStatus();
-  })
-  .catch(function(e) {
-    errorCount++;
-    resultBox.className   = "error";
-    resultBox.textContent = "Network error: " + e.message;
-    updateStatus();
-  })
-  .finally(function() {
-    spinner.classList.remove("active");
-    solveBtn.disabled     = false;
-    statusDot.style.color = "#3CBD52";
-  });
+function runCmd(){
+ const text=document.getElementById('cmd').value;
+ sendQuery(text);
 }
 
-function bar62() {
-  var s = "";
-  for (var i = 0; i < 62; i++) { s += "\u2500"; }
-  return s;
+function runStructured(){
+ const solver=document.getElementById('solver').value;
+ const p1=document.getElementById('param1').value;
+ const p2=document.getElementById('param2').value;
+ const p3=document.getElementById('param3').value;
+ let cmd=`get ${solver} a=${p1} b=${p2} c=${p3}`;
+ sendQuery(cmd);
 }
 
-function renderResult(data) {
-  var b = bar62();
-  var html = "";
-  if (data.success) {
-    resultBox.className = "success";
-    html += "<span style=\"color:#3CBD52\">\u2713  :" + data.command + "</span>\n";
-    html += "<span style=\"color:#818B98\">     solver : :" + data.solver + "</span>\n";
-    html += "<span style=\"color:#333A41\">" + b + "</span>\n\n";
-
-    if (data.rows && data.rows.length > 0) {
-      html += "<table class=\"result-table\">";
-      html += "<tr><th>Quantity</th><th>Value</th><th>Unit</th></tr>";
-      var i, row;
-      for (i = 0; i < data.rows.length; i++) {
-        row   = data.rows[i];
-        html += "<tr>";
-        html += "<td class=\"td-key\">"  + row.key   + "</td>";
-        html += "<td class=\"td-val\">"  + row.value + "</td>";
-        html += "<td class=\"td-unit\">" + row.unit  + "</td>";
-        html += "</tr>";
-      }
-      html += "</table>\n";
-    }
-
-    html += "\n<span style=\"color:#333A41\">" + b + "</span>\n";
-    html += "<span style=\"color:#53A2FF\">\u270e  " + data.message + "</span>";
-    resultBox.innerHTML = html;
-
-  } else {
-    resultBox.className = "error";
-    resultBox.innerHTML =
-      "<span style=\"color:#F44D45\">\u2717  :" + data.command + "</span>\n\n" +
-      data.message;
-  }
+function sendQuery(q){
+ fetch('/solve',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({query:q})})
+ .then(r=>r.json())
+ .then(d=>{
+   renderResult(d);
+   addHistory(q);
+   if(d.rows) plotData(d.rows);
+ });
 }
 
-function addHistory(text, ok) {
-  historyLog.unshift({ text: text, ok: ok });
-  if (historyLog.length > MAX_HIST) { historyLog.pop(); }
-
-  var html = "";
-  var i, entry, n, icon, trim, num;
-  for (i = 0; i < historyLog.length; i++) {
-    entry = historyLog[i];
-    n     = historyLog.length - i;
-    icon  = entry.ok
-      ? "<span class=\"h-ok\">\u2713</span>"
-      : "<span class=\"h-err\">\u2717</span>";
-    trim  = entry.text.length > 70
-      ? entry.text.slice(0, 67) + "..."
-      : entry.text;
-    num   = n < 10 ? " " + n : "" + n;
-    html += "  " + num + ".  " + icon + "  " + trim + "\n";
-  }
-  histList.innerHTML = html;
+function renderResult(d){
+ document.getElementById('resultPanel').innerText=JSON.stringify(d,null,2);
 }
 
-function updateStatus() {
-  statusText.textContent =
-    "Ready  |  Queries: " + queryCount +
-    "  |  Errors: "       + errorCount +
-    "  |  Last: "         + lastCmd;
+function addHistory(q){
+ historyLog.unshift(q);
+ document.getElementById('historyPanel').innerText=historyLog.join("\n");
 }
 
-solveBtn.addEventListener("click", solve);
-
-clearBtn.addEventListener("click", function() {
-  resultBox.className   = "";
-  resultBox.textContent = "  Cleared. Ready for next command.";
-});
-
-cmdInput.addEventListener("keydown", function(e) {
-  if (e.key === "Enter" && (e.ctrlKey || e.metaKey)) {
-    e.preventDefault();
-    solve();
-  }
-});
-
-loadRegistry();
+function plotData(rows){
+ let labels=rows.map(r=>r.key);
+ let values=rows.map(r=>parseFloat(r.value)||0);
+ if(chart) chart.destroy();
+ chart=new Chart(document.getElementById('chart'),{
+ type:'line',
+ data:{labels:labels,datasets:[{label:'Values',data:values}]}
+ });
+}
 </script>
 </body>
 </html>
+
+
+<!-- UPDATED gui_web.jl -->
+# Minimal improved backend with structured handling
+using HTTP, JSON
+
+function solve_handler(req)
+    data = JSON.parse(String(req.body))
+    query = data["query"]
+
+    # dummy parser (expand later)
+    result = Dict(
+        "success"=>true,
+        "command"=>query,
+        "solver"=>"demo",
+        "rows"=>[
+            Dict("key"=>"value1","value"=>"10","unit"=>"N"),
+            Dict("key"=>"value2","value"=>"20","unit"=>"m")
+        ],
+        "message"=>"computed"
+    )
+
+    return HTTP.Response(200, JSON.json(result))
+end
+
+HTTP.serve(req->solve_handler(req), "0.0.0.0", 8080)
