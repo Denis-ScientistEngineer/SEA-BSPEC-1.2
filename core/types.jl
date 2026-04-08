@@ -2,26 +2,34 @@
 # FILE: core/types.jl
 #
 # Shared data contracts for the entire B-SPEC engine.
-# These types are the "language" every module speaks.
-# No logic here — pure data structures only.
-# Every other file depends on this. It is included first.
+# This file is the single source of truth for all types.
+# Every other file depends on this. Loaded first, always.
+#
+# KEY ARCHITECTURAL CHANGE (v2.2):
+#   SolverEntry now contains a list of SolverVariants.
+#   Each SolverVariant defines ONE rearrangement of a physical
+#   equation — e.g. "find E given Q and r", or "find Q given E and r".
+#   The Dispatcher auto-selects the correct variant based on
+#   which variables the user provides.
+#
+#   This means every solver can now compute ANY variable in its
+#   equation, not just the one fixed output it had before.
 # ================================================================
 
-using LinearAlgebra   # for norm(), dot(), cross() used in solvers
+using LinearAlgebra
 
-# ── Input side ───────────────────────────────────────────────────────────────
+# ── Input side ───────────────────────────────────────────────────
 
 """
     PhysicalQuery
 
-The structured form of a user's input after tokenization.
-Produced by: Tokenizer
-Consumed by: Dispatcher
+The structured form of user input after tokenization.
+Produced by: Tokenizer.  Consumed by: Dispatcher.
 
 Fields:
-  command :: Symbol          — what to compute,  e.g. :electric_field
-  params  :: Dict{Symbol,Any}— extracted key=value pairs
-  raw     :: String          — original unmodified input (audit trail)
+  command   — which solver family, e.g. :electric_field
+  params    — key=value pairs the user provided
+  raw       — original unmodified input (audit trail)
 """
 struct PhysicalQuery
     command :: Symbol
@@ -29,47 +37,58 @@ struct PhysicalQuery
     raw     :: String
 end
 
-# ── Registry ─────────────────────────────────────────────────────────────────
+# ── Variant system (new) ─────────────────────────────────────────
+
+"""
+    SolverVariant
+
+One specific rearrangement of a physical equation.
+
+Fields:
+  given       — params that MUST be present for this variant to run
+  solves      — the primary unknown this variant computes (Symbol used
+                for dispatch matching — should NOT be in given)
+  handler     — the Julia function: Dict{Symbol,Any} → SolverResult
+  description — human-readable label, e.g. "Find E given Q and r"
+"""
+struct SolverVariant
+    given       :: Vector{Symbol}
+    solves      :: Symbol
+    handler     :: Function
+    description :: String
+end
 
 """
     SolverEntry
 
-One registered solver's full metadata + handler.
-Stored in the Dispatcher registry.
+A complete solver family: one physical equation with all its
+possible algebraic rearrangements as SolverVariants.
 
 Fields:
-  command         — the command keyword that triggers this solver
-  required_params — parameters that MUST be present; dispatch fails without them
-  optional_params — parameters that MAY be present; solvers provide defaults
-  handler         — the actual Julia function: Dict → SolverResult
-  description     — human-readable one-liner
-  domain          — which solver file owns this, e.g. :electromagnetics
+  command     — dispatch key, e.g. :electric_field
+  domain      — solver module, e.g. :electromagnetics
+  description — one-line summary of what this solver handles
+  equation    — the physical equation as a readable string
+  all_vars    — every variable in the equation (for UI form building)
+  variants    — all supported rearrangements
 """
 struct SolverEntry
-    command         :: Symbol
-    required_params :: Vector{Symbol}
-    optional_params :: Vector{Symbol}
-    handler         :: Function
-    description     :: String
-    domain          :: Symbol
+    command     :: Symbol
+    domain      :: Symbol
+    description :: String
+    equation    :: String
+    all_vars    :: Vector{Symbol}
+    variants    :: Vector{SolverVariant}
 end
 
-# ── Output side ──────────────────────────────────────────────────────────────
+# ── Output side ──────────────────────────────────────────────────
 
 """
     SolverResult
 
-Standardized output returned by every solver, always.
+Standardised output returned by every solver, always.
 Solvers never print or return raw values — only SolverResult.
-The Engine formats and delivers this to the user.
-
-Fields:
-  command   — the command that was handled
-  outputs   — computed quantities as a named Dict
-  units     — SI unit string for each output key
-  solver_id — which domain/solver handled this (:electromagnetics, etc.)
-  success   — whether computation completed without error
-  message   — human-readable summary or error description
+The Engine and GUI format and deliver this to the user.
 """
 struct SolverResult
     command   :: Symbol
@@ -80,13 +99,13 @@ struct SolverResult
     message   :: String
 end
 
-# ── Engine state ─────────────────────────────────────────────────────────────
+# ── Engine state ─────────────────────────────────────────────────
 
 """
     EngineState
 
 Mutable runtime state of the engine instance.
-Tracks health metrics and what has been initialized.
+Tracks health metrics and what has been initialised.
 """
 mutable struct EngineState
     initialized    :: Bool
@@ -98,9 +117,9 @@ end
 
 EngineState() = EngineState(false, Symbol[], 0, 0, nothing)
 
-# ── Convenience constructors ─────────────────────────────────────────────────
+# ── Convenience helpers ──────────────────────────────────────────
 
 """Build a failed SolverResult with minimal boilerplate."""
-function failed_result(cmd::Symbol, solver_id::Symbol, msg::String) :: SolverResult
+function failed_result(cmd::Symbol, solver_id::Symbol, msg::String)::SolverResult
     SolverResult(cmd, Dict{Symbol,Any}(), Dict{Symbol,String}(), solver_id, false, msg)
 end

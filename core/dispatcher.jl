@@ -1,175 +1,174 @@
 # ================================================================
 # FILE: core/dispatcher.jl
 #
-# Dispatcher — Stage 2 of the engine pipeline. The Central Brain.
+# Dispatcher — Central Brain of the B-SPEC engine.
 #
-# Responsibility:
-#   1. Maintain the solver registry (a Dict of SolverEntry records)
-#   2. Accept a PhysicalQuery from the Engine
-#   3. Find the matching solver
-#   4. Validate that all required parameters are present
-#   5. Invoke the solver's handler function
-#   6. Return a SolverResult — always, even on failure
+# Responsibilities:
+#   1. Maintain the solver registry (Dict of SolverEntry)
+#   2. Accept a PhysicalQuery
+#   3. AUTO-SELECT the correct SolverVariant based on which
+#      variables the user provided (the key new capability)
+#   4. Validate and invoke the variant handler
+#   5. Return a SolverResult — always, even on failure
+#
+# Variant selection logic:
+#   A variant MATCHES when:
+#     (a) all params in variant.given are present in query.params
+#     (b) variant.solves is NOT in query.params  (we're not
+#         computing something the user already knows)
+#   Among multiple matches, the most specific (most given params)
+#   wins.  This handles over-specified inputs gracefully.
 #
 # The Dispatcher knows NOTHING about physics.
-# It only knows how to route, validate, and invoke.
-#
-# Solvers self-register at startup by calling register_solver!().
+# It only routes, validates, and invokes.
 # ================================================================
 
-# ── Registry ─────────────────────────────────────────────────────────────────
+# ── Registry ─────────────────────────────────────────────────────
 
-"""
-Global solver registry.
-Maps command Symbol → SolverEntry.
-Populated at engine initialization by each solver module.
-"""
+"""Global solver registry. Maps command Symbol → SolverEntry."""
 const SOLVER_REGISTRY = Dict{Symbol, SolverEntry}()
 
-"""
-    register_solver!(entry::SolverEntry)
-
-Add a solver to the global registry.
-Called by each solver module during engine initialization.
-Warns (but does not error) on duplicate registration.
-"""
+"""Register a solver. Warns on duplicate."""
 function register_solver!(entry::SolverEntry)
     if haskey(SOLVER_REGISTRY, entry.command)
-        @warn "Dispatcher: overwriting existing solver for command :$(entry.command)"
+        @warn "Dispatcher: overwriting existing solver for :$(entry.command)"
     end
     SOLVER_REGISTRY[entry.command] = entry
-    @debug "Dispatcher: registered [:$(entry.command)] ← domain :$(entry.domain)"
+    @debug "Dispatcher: registered [:$(entry.command)] ← :$(entry.domain) ($(length(entry.variants)) variants)"
 end
 
-# ── Core dispatch logic ───────────────────────────────────────────────────────
+# ── Variant selection ─────────────────────────────────────────────
 
 """
-    dispatch(query::PhysicalQuery) :: SolverResult
+    select_variant(entry, provided) → SolverVariant or nothing
 
-Route a PhysicalQuery to its solver and return a SolverResult.
+Find the best-matching variant given the set of provided param keys.
 
-Pipeline:
-  1. Lookup command in registry         → fail gracefully if not found
-  2. Validate required parameters       → fail gracefully if missing
-  3. Invoke solver handler in try/catch → fail gracefully on solver error
-  4. Always return a SolverResult
-
-This function NEVER throws. All errors are captured in the SolverResult.
+Rules:
+  1. All variant.given params must be in provided
+  2. variant.solves must NOT be in provided
+  3. Among matches, most-given-params wins (most specific)
 """
-function dispatch(query::PhysicalQuery) :: SolverResult
+function select_variant(entry::SolverEntry, provided::Set{Symbol})::Union{SolverVariant, Nothing}
+    candidates = filter(entry.variants) do v
+        all(p ∈ provided for p in v.given) && v.solves ∉ provided
+    end
+    isempty(candidates) && return nothing
+    # Most specific first
+    sort!(candidates, by = v -> length(v.given), rev = true)
+    return first(candidates)
+end
 
-    # ── Step 1: find solver ──────────────────────────────────────────────
+# ── Core dispatch ────────────────────────────────────────────────
+
+"""
+    dispatch(query::PhysicalQuery) → SolverResult
+
+Route a query to its solver variant and return a SolverResult.
+Never throws — all errors are returned as failed SolverResults.
+"""
+function dispatch(query::PhysicalQuery)::SolverResult
+
+    # ── Step 1: find solver ──────────────────────────────────────
     if !haskey(SOLVER_REGISTRY, query.command)
         similar = _suggest_similar(query.command)
-        hint    = isempty(similar) ? "" : " Did you mean: $(join(similar, ", "))?"
+        hint    = isempty(similar) ? "" :
+                  "  Did you mean: $(join(similar, ", "))?"
         return failed_result(
             query.command, :dispatcher,
-            "No solver registered for command :$(query.command).$hint\n" *
-            "  Available commands: $(join(sort(string.(keys(SOLVER_REGISTRY))), ", "))"
+            "No solver registered for :$(query.command).$hint\n" *
+            "  Available: $(join(sort(string.(keys(SOLVER_REGISTRY))), ", "))"
         )
     end
 
-    entry = SOLVER_REGISTRY[query.command]
+    entry    = SOLVER_REGISTRY[query.command]
+    provided = Set(keys(query.params))
 
-    # ── Step 2: validate required parameters ────────────────────────────
-    present        = Set(keys(query.params))
-    required       = Set(entry.required_params)
-    missing_params = setdiff(required, present)
+    # ── Step 2: auto-select variant ──────────────────────────────
+    variant  = select_variant(entry, provided)
 
-    if !isempty(missing_params)
+    if isnothing(variant)
+        # Build a helpful error showing all available modes
+        modes = join(
+            ["  • $(v.description)\n    Needs: [$(join(v.given, ", "))]"
+             for v in entry.variants],
+            "\n"
+        )
+        what_given = isempty(provided) ? "(nothing)" : join(sort(string.(provided)), ", ")
+
         return failed_result(
             query.command, entry.domain,
-            "Missing required parameter(s) for :$(query.command): " *
-            "[ $(join(missing_params, ", ")) ]\n" *
-            "  Required : $(join(entry.required_params, ", "))\n" *
-            "  Optional : $(join(entry.optional_params, ", "))\n" *
-            "  Provided : $(join(keys(query.params), ", "))"
+            "Cannot find a matching calculation mode for :$(query.command).\n" *
+            "  You provided : [$what_given]\n\n" *
+            "  Available modes:\n$modes\n\n" *
+            "  Tip: provide exactly the variables listed under 'Needs' for the mode you want."
         )
     end
 
-    # ── Step 3: invoke solver (fully sandboxed) ──────────────────────────
+    # ── Step 3: invoke variant handler (sandboxed) ───────────────
     try
-        result = entry.handler(query.params)
-        # Ensure the solver returned the right type
+        result = variant.handler(query.params)
         result isa SolverResult || error(
-            "Solver for :$(query.command) returned $(typeof(result)) instead of SolverResult.")
+            "Handler for :$(query.command) returned $(typeof(result)), expected SolverResult.")
         return result
     catch e
         return failed_result(
             query.command, entry.domain,
-            "Solver :$(query.command) raised an error:\n  $(sprint(showerror, e))"
+            "Calculation error in :$(query.command) [$(variant.description)]:\n" *
+            "  $(sprint(showerror, e))"
         )
     end
 end
 
-# ── Registry inspection ───────────────────────────────────────────────────────
+# ── Registry inspection ──────────────────────────────────────────
 
-"""
-    registered_commands() :: Vector{Symbol}
+registered_commands()::Vector{Symbol} =
+    sort(collect(keys(SOLVER_REGISTRY)), by = string)
 
-Return all currently registered command symbols, sorted.
-"""
-registered_commands() :: Vector{Symbol} =
-    sort(collect(keys(SOLVER_REGISTRY)), by=string)
-
-"""
-    list_solvers()
-
-Pretty-print the complete solver registry to stdout.
-"""
+"""Pretty-print the complete solver registry."""
 function list_solvers()
-    println("\n" * "┌" * "─"^62 * "┐")
-    println("│  SOLVER REGISTRY  ($(length(SOLVER_REGISTRY)) solvers loaded)" *
-            " "^(28 - ndigits(length(SOLVER_REGISTRY))) * "│")
-    println("├" * "─"^62 * "┤")
+    println("\n┌" * "─"^68 * "┐")
+    n = length(SOLVER_REGISTRY)
+    println("│  SOLVER REGISTRY  ($n solver$(n==1 ? "" : "s") loaded)" *
+            " "^(34 - ndigits(n)) * "│")
+    println("├" * "─"^68 * "┤")
 
     if isempty(SOLVER_REGISTRY)
-        println("│  (no solvers registered)                               │")
+        println("│  (empty)  " * " "^57 * "│")
     else
-        # Group by domain for readability
         domains = Dict{Symbol, Vector{SolverEntry}}()
-        for entry in values(SOLVER_REGISTRY)
-            push!(get!(domains, entry.domain, SolverEntry[]), entry)
+        for e in values(SOLVER_REGISTRY)
+            push!(get!(domains, e.domain, SolverEntry[]), e)
         end
-
-        for (domain, entries) in sort(collect(domains), by=x->string(x[1]))
-            println("│  ▸ Domain: :$(domain)" * " "^(50 - length(string(domain))) * "│")
-            for e in sort(entries, by=x->string(x.command))
-                cmd_str = "  :$(rpad(string(e.command), 30))"
-                println("│$(cmd_str)│")
-                desc_str = "    └ $(e.description)"
-                # Truncate if too long
-                if length(desc_str) > 61
-                    desc_str = desc_str[1:58] * "..."
+        for (domain, entries) in sort(collect(domains), by = x -> string(x[1]))
+            println("│  ▸ Domain: :$(domain)" * " "^(55 - length(string(domain))) * "│")
+            for e in sort(entries, by = x -> string(x.command))
+                println("│    :$(rpad(string(e.command), 30))  $(e.equation)" *
+                        " "^max(0, 30 - length(e.equation)) * "│")
+                for v in e.variants
+                    desc = "       $(v.description)"
+                    length(desc) > 67 && (desc = desc[1:64] * "...")
+                    println("│$(rpad(desc, 68))│")
                 end
-                println("│$(rpad(desc_str, 62))│")
-                req_str = "    └ Required: [$(join(e.required_params, ", "))]"
-                println("│$(rpad(req_str, 62))│")
             end
         end
     end
-    println("└" * "─"^62 * "┘\n")
+    println("└" * "─"^68 * "┘\n")
 end
 
-# ── Private helpers ───────────────────────────────────────────────────────────
+# ── Private helpers ──────────────────────────────────────────────
 
-"""
-Suggest commands similar to an unknown one (simple character-overlap heuristic).
-Helps users who mistype commands get a useful hint.
-"""
-function _suggest_similar(cmd::Symbol, n::Int=3) :: Vector{Symbol}
-    cmd_s   = string(cmd)
-    scored  = [(c, _similarity(cmd_s, string(c))) for c in keys(SOLVER_REGISTRY)]
-    sorted  = sort(scored, by=x->x[2], rev=true)
-    # Only suggest if reasonably similar
+function _suggest_similar(cmd::Symbol, n::Int = 3)::Vector{Symbol}
+    cmd_s  = string(cmd)
+    scored = [(c, _similarity(cmd_s, string(c))) for c in keys(SOLVER_REGISTRY)]
+    sorted = sort(scored, by = x -> x[2], rev = true)
     [s[1] for s in sorted[1:min(n, end)] if s[2] > 0.3]
 end
 
-"""Simple Jaccard similarity on character bigrams."""
-function _similarity(a::String, b::String) :: Float64
+function _similarity(a::String, b::String)::Float64
     bigrams(s) = Set(s[i:i+1] for i in 1:max(1, length(s)-1))
     A, B = bigrams(a), bigrams(b)
     isempty(A) && isempty(B) && return 1.0
-    isempty(A) || isempty(B) && return 0.0
+    (isempty(A) || isempty(B)) && return 0.0
     length(intersect(A, B)) / length(union(A, B))
 end

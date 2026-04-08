@@ -48,6 +48,30 @@
 # Open: http://localhost:8050
 # ================================================================
 
+#!/usr/bin/env julia
+# ================================================================
+# FILE: gui_web.jl   —   B-SPEC Physical Engine  Web UI  v2.1
+#
+# What's new in v2.1:
+#   - /chain endpoint: multi-step solver pipelines where the output
+#     of one solver feeds directly into the next
+#   - Plot type system: solvers declare bar/line/vector plot hints
+#   - Fixed _parse_params: handles nested arrays [[x,y,z],[x,y,z]]
+#   - Rich history: stores full result rows, click to replay
+#   - Unit hints on every param field label
+#   - "Use as input" button on result rows for chain building
+#   - Pipeline UI: visual step builder (3rd mode tab)
+#
+# API:
+#   GET  /         → single-page application
+#   GET  /solvers  → solver registry + param metadata + unit hints
+#   POST /solve    → {mode, solver?, params?, query?}
+#   POST /chain    → {steps:[{id,solver,params},...]}   NEW
+#
+# Run : julia gui_web.jl   (from any directory — uses @__DIR__)
+# Open: http://localhost:8050
+# ================================================================
+
 using Revise
 
 const _D = @__DIR__
@@ -77,34 +101,51 @@ const PARAM_META = Dict{Symbol, Tuple{String,String}}(
     :normal           => ("vector3","dimensionless"),
     :E_field          => ("vector3","N/C"),
     :charge           => ("scalar","C"),
-    :q1               => ("scalar","C"),
-    :q2               => ("scalar","C"),
-    :area             => ("scalar","m²"),
-    :capacitance      => ("scalar","F"),
-    :voltage          => ("scalar","V"),
-    :V_in             => ("scalar","V"),
-    :initial_velocity => ("scalar","m/s"),
-    :angle_deg        => ("scalar","°"),
-    :initial_height   => ("scalar","m"),
-    :g                => ("scalar","m/s²"),
-    :m1               => ("scalar","kg"),
-    :m2               => ("scalar","kg"),
-    :distance         => ("scalar","m"),
-    :mass             => ("scalar","kg"),
-    :velocity         => ("scalar","m/s"),
-    :force            => ("scalar","N"),
-    :displacement     => ("scalar","m"),
-    :spring_constant  => ("scalar","N/m"),
-    :damping          => ("scalar","N·s/m"),
-    :amplitude        => ("scalar","m"),
-    :initial_position => ("scalar","m"),
-    :radius           => ("scalar","m"),
-    :speed            => ("scalar","m/s"),
-    :v1               => ("scalar","m/s"),
-    :v2               => ("scalar","m/s"),
-    :acceleration     => ("scalar","m/s²"),
-    :charges          => ("array","C"),
-    :sources          => ("array","m"),
+    :q1                => ("scalar","C"),
+    :q2                => ("scalar","C"),
+    :area              => ("scalar","m²"),
+    :capacitance       => ("scalar","F"),
+    :voltage           => ("scalar","V"),
+    :V_in              => ("scalar","V"),
+    :initial_velocity  => ("scalar","m/s"),
+    :angle_deg         => ("scalar","°"),
+    :initial_height    => ("scalar","m"),
+    :g                 => ("scalar","m/s²"),
+    :m1                => ("scalar","kg"),
+    :m2                => ("scalar","kg"),
+    :distance          => ("scalar","m"),
+    :mass              => ("scalar","kg"),
+    :velocity          => ("scalar","m/s"),
+    :force             => ("scalar","N"),
+    :displacement      => ("scalar","m"),
+    :spring_constant   => ("scalar","N/m"),
+    :damping           => ("scalar","N·s/m"),
+    :amplitude         => ("scalar","m"),
+    :initial_position  => ("scalar","m"),
+    :radius            => ("scalar","m"),
+    :speed             => ("scalar","m/s"),
+    :v1                => ("scalar","m/s"),
+    :v2                => ("scalar","m/s"),
+    :acceleration      => ("scalar","m/s²"),
+    :charges           => ("array","C"),
+    :sources           => ("array","m"),
+    # ── Computed quantities that can also be provided as inputs ──
+    :E_magnitude       => ("scalar","N/C"),
+    :r_magnitude       => ("scalar","m"),
+    :F_magnitude       => ("scalar","N"),
+    :test_force        => ("scalar","N"),
+    :test_charge       => ("scalar","C"),
+    :V                 => ("scalar","V"),
+    :KE                => ("scalar","J"),
+    :work              => ("scalar","J"),
+    :energy            => ("scalar","J"),
+    :momentum          => ("scalar","kg·m/s"),
+    :flux              => ("scalar","N·m²/C"),
+    :centripetal_force => ("scalar","N"),
+    :angular_frequency => ("scalar","rad/s"),
+    :frequency_hz      => ("scalar","Hz"),
+    :period            => ("scalar","s"),
+    :range             => ("scalar","m"),
 )
 param_type(p::Symbol) = get(PARAM_META, p, ("scalar",""))[1]
 param_unit(p::Symbol) = get(PARAM_META, p, ("scalar",""))[2]
@@ -292,14 +333,25 @@ function build_solver_metadata()::Dict
         d     = string(e.domain)
         types = Dict{String,String}()
         uhint = Dict{String,String}()
-        for p in [e.required_params; e.optional_params]
+        for p in e.all_vars
             types[string(p)] = param_type(p)
             uhint[string(p)] = param_unit(p)
         end
-        info = Dict("command"=>string(cmd), "description"=>e.description,
-                    "required"=>string.(e.required_params),
-                    "optional"=>string.(e.optional_params),
-                    "param_types"=>types, "param_units"=>uhint)
+        # Expose each variant so the frontend can do real-time variant preview
+        variants_info = map(e.variants) do v
+            Dict("given"       => string.(v.given),
+                 "solves"      => string(v.solves),
+                 "description" => v.description)
+        end
+        info = Dict(
+            "command"     => string(cmd),
+            "description" => e.description,
+            "equation"    => e.equation,
+            "all_vars"    => string.(e.all_vars),
+            "param_types" => types,
+            "param_units" => uhint,
+            "variants"    => variants_info
+        )
         push!(get!(domains, d, Dict[]), info)
     end
     for v in values(domains); sort!(v, by=x->x["command"]); end
@@ -422,6 +474,9 @@ select{width:100%;background:var(--surface);border:1px solid var(--border);
 select:focus{border-color:var(--accent);box-shadow:0 0 0 1px var(--accent)}
 .solver-desc{font-size:12px;color:var(--text-dim);padding:0 2px 10px;line-height:1.5;
   border-bottom:1px solid var(--border);margin-bottom:10px}
+.variant-preview{font-size:12px;padding:6px 4px 10px;line-height:1.5;border-bottom:1px solid var(--border);margin-bottom:8px}
+.variant-preview.dim{color:var(--text-dim)}
+.variant-preview.ready{color:var(--success);font-weight:500}
 .field-group{margin-bottom:10px}
 .field-label{display:flex;justify-content:space-between;align-items:center;
   font-size:12px;color:var(--text);margin-bottom:5px;font-weight:500}
@@ -578,6 +633,8 @@ tr:hover .btn-use{display:inline-block}
       <div class="sec-label" style="padding:4px 0 8px">Solver Engine</div>
       <select id="solver-select" onchange="onSolverChange()"><option>loading...</option></select>
       <div class="solver-desc" id="solver-desc">Select a solver above.</div>
+      <div id="solver-equation" style="font-size:11px;color:var(--unit);padding:0 2px 6px;font-family:var(--font-mono);letter-spacing:.5px"></div>
+      <div id="variant-preview" class="variant-preview dim">Select a solver to begin.</div>
       <div id="param-fields"></div>
     </div>
     <div class="cmd-panel" id="cmd-panel">
@@ -724,19 +781,64 @@ function buildParamFields(){
   var container=document.getElementById('param-fields');
   container.innerHTML='';if(!solver)return;
   document.getElementById('solver-desc').textContent=solver.description;
-  solver.required.forEach(function(p){container.appendChild(makeField(p,solver.param_types[p]||'scalar',solver.param_units[p]||'',true,''));});
-  solver.optional.forEach(function(p){container.appendChild(makeField(p,solver.param_types[p]||'scalar',solver.param_units[p]||'',false,''));});
+  // Show the physical equation
+  var eqEl=document.getElementById('solver-equation');
+  if(eqEl)eqEl.textContent=solver.equation||'';
+  // Show ALL variables (not just required) — user fills in what they know
+  var allVars=solver.all_vars||(solver.required||[]).concat(solver.optional||[]);
+  allVars.forEach(function(p){
+    var fld=makeField(p,solver.param_types[p]||'scalar',solver.param_units[p]||'','',false);
+    container.appendChild(fld);
+    fld.querySelectorAll('input').forEach(function(inp){
+      inp.addEventListener('input',updateVariantPreview);
+    });
+  });
+  // Add variant preview indicator
+  var prev=document.getElementById('variant-preview');
+  if(prev){prev.textContent='Fill in the values you know above';prev.className='variant-preview dim';}
+  updateVariantPreview();
 }
 
-function makeField(name,type,unit,required,prefix){
+function updateVariantPreview(){
+  var solver=getSolverInfo();
+  var prev=document.getElementById('variant-preview');
+  if(!solver||!prev)return;
+  var allVars=solver.all_vars||(solver.required||[]).concat(solver.optional||[]);
+  var filled=new Set();
+  allVars.forEach(function(p){
+    var type=solver.param_types[p]||'scalar';
+    if(type==='vector3'){
+      var xi=document.getElementById('p__'+p+'__x');
+      if(xi&&xi.value!=='')filled.add(p);
+    }else{
+      var inp=document.getElementById('p__'+p);
+      if(inp&&inp.value!=='')filled.add(p);
+    }
+  });
+  var variants=solver.variants||[];
+  var matching=variants.filter(function(v){
+    return v.given.every(function(p){return filled.has(p);})&&!filled.has(v.solves);
+  });
+  if(filled.size===0){
+    prev.textContent='Fill in the values you know above'; prev.className='variant-preview dim';
+  }else if(matching.length===0){
+    prev.textContent='Need more values to determine what to compute'; prev.className='variant-preview dim';
+  }else{
+    matching.sort(function(a,b){return b.given.length-a.given.length;});
+    var best=matching[0];
+    prev.textContent='\u2192 Will solve for: '+best.solves.replace(/_/g,' ')+' \u2014 '+best.description;
+    prev.className='variant-preview ready';
+  }
+}
+
+function makeField(name,type,unit,_unused_req,prefix){
   var idpre=prefix?prefix+'__'+name:'p__'+name;
   var div=document.createElement('div');div.className='field-group';
   var lbl=document.createElement('div');lbl.className='field-label';
   var ns=document.createElement('span');ns.textContent=name.replace(/_/g,' ');lbl.appendChild(ns);
   var bs=document.createElement('span');bs.style.display='flex';bs.style.gap='4px';
   if(unit){var ub=document.createElement('span');ub.className='badge unit';ub.textContent=unit;bs.appendChild(ub);}
-  var rb=document.createElement('span');rb.className=required?'badge req':'badge opt';
-  rb.textContent=required?'req':'opt';bs.appendChild(rb);lbl.appendChild(bs);div.appendChild(lbl);
+  lbl.appendChild(bs);div.appendChild(lbl);
   if(type==='vector3'){
     var row=document.createElement('div');row.className='vec-row';
     ['x','y','z'].forEach(function(axis){
@@ -756,7 +858,7 @@ function makeField(name,type,unit,required,prefix){
 function collectParams(prefix,solver){
   if(!solver)return null;
   var params={};var idpre=prefix?prefix+'__':'p__';
-  var all=solver.required.concat(solver.optional);
+  var all=solver.all_vars||(solver.required||[]).concat(solver.optional||[]);
   for(var i=0;i<all.length;i++){
     var name=all[i];var type=solver.param_types[name]||'scalar';
     if(type==='vector3'){
@@ -814,8 +916,8 @@ function buildChainStepFields(id){
   var solver=getChainSolverInfo(id);
   var cont=document.getElementById('chain-fields-'+id);cont.innerHTML='';
   if(!solver)return;
-  solver.required.forEach(function(p){cont.appendChild(makeField(p,solver.param_types[p]||'scalar',solver.param_units[p]||'',true,'chain_'+id));});
-  solver.optional.forEach(function(p){cont.appendChild(makeField(p,solver.param_types[p]||'scalar',solver.param_units[p]||'',false,'chain_'+id));});
+  var allVars=solver.all_vars||(solver.required||[]).concat(solver.optional||[]);
+  allVars.forEach(function(p){cont.appendChild(makeField(p,solver.param_types[p]||'scalar',solver.param_units[p]||'','','chain_'+id));});
 }
 
 function collectChainSteps(){
