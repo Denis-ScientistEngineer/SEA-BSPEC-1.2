@@ -1,28 +1,6 @@
 # ================================================================
 # FILE: solvers/electromagnetics.jl
 #
-# Electromagnetics Solver Module
-#
-# Responsibility: contain ALL electromagnetic physical laws and
-# their numerical implementations. This file is a self-contained
-# physics library. It knows nothing about the engine pipeline —
-# it only receives a Dict of parameters and returns a SolverResult.
-#
-# Registers itself with the Dispatcher via register_electromagnetics!()
-# which is called once by main.jl during engine startup.
-#
-# Physical laws implemented:
-#   - Coulomb's law                  (electric force)
-#   - Gauss's law (point charge)     (electric field)
-#   - Electric potential             (scalar field)
-#   - Superposition principle        (multi-charge fields)
-#   - Electric flux (planar)         (Gauss surface)
-#   - Energy stored in E-field       (capacitor)
-# ================================================================
-
-# ================================================================
-# FILE: solvers/electromagnetics.jl
-#
 # Electromagnetics Solver Module  (v2.2 — multi-variant)
 #
 # Every solver now supports ALL algebraic rearrangements of its
@@ -43,8 +21,6 @@
 #   Electric flux     :  Φ = E⃗ · A⃗
 #   Capacitor energy  :  U = ½CV²
 # ================================================================
-
-# packages
 
 using LinearAlgebra
 using Printf
@@ -416,4 +392,75 @@ function register_electromagnetics!()
                 _em_superposition, "Find E⃗_net  given array of charges and their positions"),
         ]
     ))
+
+    register_solver!(SolverEntry(
+        :coulomb_force_superposition, :electromagnetics,
+        "Net force on a target charge from multiple source charges (superposition)",
+        "F⃗_net = Σ kq_t·qᵢ/rᵢ² r̂ᵢ",
+        [:target_charge, :target_position, :other_charges, :other_positions],
+        [
+            SolverVariant(
+                [:target_charge, :target_position, :other_charges, :other_positions],
+                :F_magnitude,
+                _em_force_superposition,
+                "Find net F⃗ on target charge from all other charges"
+            ),
+        ]
+    ))
+end
+
+# ════════════════════════════════════════════════════════════════
+# SOLVER: coulomb_force_superposition
+# Net force on one charge from N surrounding charges
+# F⃗_net = Σ kq_t·qᵢ/rᵢ² r̂ᵢ
+# ════════════════════════════════════════════════════════════════
+
+function _em_force_superposition(p::Dict{Symbol,Any})::SolverResult
+    qt   = _f64(p[:target_charge])
+    rt   = _vec3(p[:target_position])
+    qsrc = Vector{Float64}(p[:other_charges])
+    rsrc = p[:other_positions]
+
+    length(qsrc) == length(rsrc) || throw(ArgumentError(
+        "other_charges length ($(length(qsrc))) ≠ other_positions length ($(length(rsrc)))."))
+
+    F⃗_net  = zeros(Float64, 3)
+    F_parts = Dict{Symbol, Any}()
+    skipped = 0
+
+    for i in eachindex(qsrc)
+        ri  = _vec3(rsrc[i])
+        r⃗   = rt .- ri
+        r   = norm(r⃗)
+        if r < 1e-15; skipped += 1; continue; end
+        Fi  = EM_k * qt * qsrc[i] / r^2 .* (r⃗ ./ r)
+        F⃗_net .+= Fi
+        F_parts[Symbol("F_from_charge_$(i)")] = norm(Fi)
+    end
+
+    F = norm(F⃗_net)
+    n = length(qsrc)
+
+    outputs = Dict{Symbol,Any}(
+        :F_net_vector    => F⃗_net,
+        :F_magnitude     => F,
+        :n_source_charges => n,
+        :n_skipped       => skipped,
+        :target_charge   => qt,
+    )
+    merge!(outputs, F_parts)
+
+    units = Dict{Symbol,String}(
+        :F_net_vector     => "N",
+        :F_magnitude      => "N",
+        :n_source_charges => "count",
+        :n_skipped        => "count",
+        :target_charge    => "C",
+    )
+    for k in keys(F_parts); units[k] = "N"; end
+
+    SolverResult(:coulomb_force_superposition,
+        outputs, units, :electromagnetics, true,
+        "Net force = $(round(F,sigdigits=5)) N  on  qt=$(round(qt,sigdigits=4)) C  " *
+        "from $n source charge$(n==1 ? "" : "s")$(skipped>0 ? " ($skipped skipped)" : "")")
 end

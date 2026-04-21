@@ -1,55 +1,5 @@
 #!/usr/bin/env julia
 # ================================================================
-# FILE: gui_web.jl   B-SPEC Physical Engine  Web Interface v2.0
-#
-# Architecture (from design doc):
-#   Browser → JSON request → Julia HTTP server → engine → JSON response → Browser
-#
-# Endpoints:
-#   GET  /         → full single-page application (HTML/CSS/JS)
-#   GET  /solvers  → solver registry + param metadata (drives auto-form)
-#   POST /solve    → {mode, solver?, params?, query?} → {success, rows, plot_data}
-#
-# Modes:
-#   "structured" → frontend sends {solver, params} dict — bypasses tokenizer
-#   "command"    → frontend sends raw string — goes through full pipeline
-#
-# Key fix: uses @__DIR__ for all includes, so the file runs correctly
-# from ANY directory (VSCode terminal, system terminal, anywhere).
-#
-# Key fix: HTML_PAGE uses raw string literal so JS ${...} template
-# expressions are never seen by Julia's string interpolation.
-#
-# Run : julia gui_web.jl
-# Open: http://localhost:8050
-# ================================================================
-
-#!/usr/bin/env julia
-# ================================================================
-# FILE: gui_web.jl   —   B-SPEC Physical Engine  Web UI  v2.1
-#
-# What's new in v2.1:
-#   - /chain endpoint: multi-step solver pipelines where the output
-#     of one solver feeds directly into the next
-#   - Plot type system: solvers declare bar/line/vector plot hints
-#   - Fixed _parse_params: handles nested arrays [[x,y,z],[x,y,z]]
-#   - Rich history: stores full result rows, click to replay
-#   - Unit hints on every param field label
-#   - "Use as input" button on result rows for chain building
-#   - Pipeline UI: visual step builder (3rd mode tab)
-#
-# API:
-#   GET  /         → single-page application
-#   GET  /solvers  → solver registry + param metadata + unit hints
-#   POST /solve    → {mode, solver?, params?, query?}
-#   POST /chain    → {steps:[{id,solver,params},...]}   NEW
-#
-# Run : julia gui_web.jl   (from any directory — uses @__DIR__)
-# Open: http://localhost:8050
-# ================================================================
-
-#!/usr/bin/env julia
-# ================================================================
 # FILE: gui_web.jl   —   B-SPEC Physical Engine  Web UI  v2.1
 #
 # What's new in v2.1:
@@ -77,6 +27,7 @@ using Revise
 const _D = @__DIR__
 includet(joinpath(_D, "core", "types.jl"))
 includet(joinpath(_D, "core", "tokenizer.jl"))
+includet(joinpath(_D, "core", "nlp_parser.jl"))
 includet(joinpath(_D, "core", "dispatcher.jl"))
 includet(joinpath(_D, "core", "engine.jl"))
 includet(joinpath(_D, "solvers", "electromagnetics.jl"))
@@ -638,12 +589,16 @@ tr:hover .btn-use{display:inline-block}
       <div id="param-fields"></div>
     </div>
     <div class="cmd-panel" id="cmd-panel">
-      <div class="sec-label" style="padding:0 0 8px">Raw Command</div>
-      <textarea id="cmd" placeholder="get electric_field charge=1e-9 source=[0,0,0] field_point=[1,0,0]"
+      <div class="sec-label" style="padding:0 0 8px">Raw Command or Problem Text</div>
+      <textarea id="cmd" placeholder="Type a command OR paste a physics problem in plain English..."
         spellcheck="false" autocorrect="off" autocomplete="off"></textarea>
       <div class="cmd-hints">
-        <b>FORMAT:</b> [verb] command key=value key=[x,y,z]<br>
-        <b>VERBS:</b> get | find | compute | solve<br>
+        <b>COMMAND FORMAT:</b><br>
+        get coulomb_force q1=1e-9 q2=-2e-9 r1=[0,0,0] r2=[0.05,0,0]<br>
+        get electric_field charge=5e-9 source=[0,0,0] field_point=[1,0,0]<br><br>
+        <b>NATURAL LANGUAGE (paste textbook problems directly):</b><br>
+        Point charges of 1 nC and -2 nC are at (0,0,0) and (1,1,1).<br>
+        Determine the vector force acting on each charge.<br><br>
         <b>TIP:</b> Ctrl+Enter to compute
       </div>
     </div>
@@ -674,7 +629,9 @@ tr:hover .btn-use{display:inline-block}
           <div class="example-box" onclick="loadExample(this)">get coulomb_force q1=1e-9 q2=-2e-9 r1=[0,0,0] r2=[0.05,0,0]</div>
           <div class="example-box" onclick="loadExample(this)">get harmonic_oscillator mass=0.5 spring_constant=200 damping=0.8</div>
           <div class="example-box" onclick="loadExample(this)">get projectile_motion initial_velocity=50 angle_deg=45 initial_height=0</div>
-          <div class="example-box" onclick="loadExample(this)">get gravitational_force m1=5.972e24 m2=7.342e22 distance=3.844e8</div>
+          <div style="font-size:11px;color:var(--text-dim);margin:12px 0 8px;text-transform:uppercase;letter-spacing:.5px">Natural language (click to load)</div>
+          <div class="example-box" onclick="loadExample(this)">Point charges of 1 nC and -2 nC are located at (0, 0, 0) and (1, 1, 1), respectively, in free space. Determine the vector force acting on each charge.</div>
+          <div class="example-box" onclick="loadExample(this)">Point charges of 50 nC each are located at A(1, 0, 0), B(-1, 0, 0), C(0, 1, 0), and D(0, -1, 0) in free space. Find the total force on the charge at A.</div>
         </div>
       </div>
       <div class="result-scroll" id="result-container">

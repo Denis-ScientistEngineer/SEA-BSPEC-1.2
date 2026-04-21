@@ -1,25 +1,6 @@
 # ================================================================
 # FILE: solvers/classical_mechanics.jl
 #
-# Classical Mechanics Solver Module
-#
-# Responsibility: implement the physical laws of classical mechanics.
-# Self-contained physics library — receives a Dict, returns SolverResult.
-#
-# Physical laws implemented:
-#   - Newton's second law            (F = ma)
-#   - Gravitational force            (Newton's law of gravitation)
-#   - Projectile motion              (kinematics under gravity)
-#   - Kinetic energy + momentum      (½mv², p=mv)
-#   - Work-energy theorem            (W = F·d·cosθ)
-#   - Harmonic oscillator            (spring system dynamics)
-#   - Circular motion                (centripetal force/acceleration)
-#   - Conservation of momentum       (elastic/inelastic collision)
-# ================================================================
-
-# ================================================================
-# FILE: solvers/classical_mechanics.jl
-#
 # Classical Mechanics Solver Module  (v2.2 — multi-variant)
 #
 # Every solver supports ALL algebraic rearrangements of its law.
