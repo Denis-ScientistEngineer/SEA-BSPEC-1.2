@@ -1,0 +1,11 @@
+WARNING: Imported binding GLib.idle_add was undeclared at import time during import to Main.
+
+========================================================
+  B-SPEC  Desktop GUI  v2.1  (Gtk4.jl)
+  Solvers : electromagnetics | classical_mechanics
+  Commands: 15
+========================================================
+
+
+(julia:13606): Gtk-WARNING **: 17:11:12.824: No IM module matching GTK_IM_MODULE=ibus found
+  Window open. Close it to exit.

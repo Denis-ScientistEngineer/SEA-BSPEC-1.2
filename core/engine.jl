@@ -71,7 +71,11 @@ function process(input, state::EngineState)::SolverResult
     state.last_command = query.command
     @info "$label Tokenized." command=query.command params=collect(keys(query.params))
 
+    t0     = time_ns()
     result = dispatch(query)
+    elapsed_ms = round((time_ns() - t0) / 1_000_000, digits=2)
+
+    result = _attach_timing(result, elapsed_ms)
     _update_state!(state, result, label)
     return result
 end
@@ -90,7 +94,6 @@ function _process_natural(input::String, state::EngineState, label::String)::Sol
         return failed_result(:unknown, :nlp_parser,
             "NLP parser error: $(sprint(showerror, e))")
     end
-
     # Always surface the parse log to the user via the result message
     log_text = join(nlp.parse_log, "\n")
 
@@ -120,8 +123,10 @@ function _process_natural(input::String, state::EngineState, label::String)::Sol
     state.last_command = nlp.solver
     @info "$label NLP parse success." solver=nlp.solver params=collect(keys(nlp.params))
 
-    # Stage 4: Dispatch
+    # Stage 4: Dispatch with timing
+    t0     = time_ns()
     result = dispatch(query)
+    elapsed_ms = round((time_ns() - t0) / 1_000_000, digits=2)
 
     # Attach parse log to message so the UI can show what was understood
     enriched_msg = result.message *
@@ -135,9 +140,16 @@ function _process_natural(input::String, state::EngineState, label::String)::Sol
     # Build enriched result
     enriched = SolverResult(result.command, result.outputs, result.units,
                             result.solver_id, result.success, enriched_msg)
+    enriched = _attach_timing(enriched, elapsed_ms)
 
     _update_state!(state, enriched, label)
     return enriched
+end
+
+"""Append compute time to a SolverResult message."""
+function _attach_timing(r::SolverResult, ms::Float64)::SolverResult
+    SolverResult(r.command, r.outputs, r.units, r.solver_id, r.success,
+                 r.message * "\n  ⏱  Computed in $(ms) ms")
 end
 
 function _update_state!(state::EngineState, result::SolverResult, label::String)

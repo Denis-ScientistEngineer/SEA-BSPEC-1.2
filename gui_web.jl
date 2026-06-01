@@ -22,6 +22,7 @@
 # Open: http://localhost:8050
 # ================================================================
 
+using GLMakie
 using Revise
 
 const _D = @__DIR__
@@ -662,6 +663,8 @@ tr:hover .btn-use{display:inline-block}
   <span class="status-sep">|</span>
   <span id="s-last">Last: none</span>
   <span class="status-sep">|</span>
+  <span id="s-time" style="color:var(--success)">Time: --</span>
+  <span class="status-sep">|</span>
   <span id="s-mode">Mode: form</span>
 </div>
 
@@ -911,7 +914,7 @@ function submitSolve(payload){
   .then(function(data){
     queryCount++;if(!data.success)errorCount++;
     renderResult(data);if(data.plot_data)renderPlot(data.plot_data);
-    addHistory(data,false);updateStatus(data.command);switchTab('result');
+    addHistory(data,false);updateStatus(data.command,data.compute_time_ms);switchTab('result');
   })
   .catch(function(e){errorCount++;showError('Network error: '+e.message);updateStatus('error');})
   .finally(function(){
@@ -930,12 +933,14 @@ function runChain(){
   document.getElementById('sdot').style.color='#f59e0b';
   fetch('/chain',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({steps:steps})})
   .then(function(r){return r.json();})
-  .then(function(results){
+  .then(function(resp){
+    var results=resp.results||resp;  // handle both {results,total_ms} and plain array
+    var totalMs=resp.total_ms!==undefined?resp.total_ms:results.reduce(function(acc,d){return acc+(d.compute_time_ms||0);},0);
     queryCount++;results.forEach(function(d){if(!d.success)errorCount++;});
-    renderChainResults(results);
+    renderChainResults(results,Math.round(totalMs*100)/100);
     if(results.length>0&&results[results.length-1].plot_data)renderPlot(results[results.length-1].plot_data);
     addHistory({command:'pipeline['+steps.length+' steps]',success:results.every(function(d){return d.success;}),message:steps.length+' steps executed',rows:[]},true);
-    updateStatus('chain');switchTab('result');
+    updateStatus('chain',Math.round(totalMs*100)/100);switchTab('result');
   })
   .catch(function(e){errorCount++;showError('Chain error: '+e.message);updateStatus('error');})
   .finally(function(){
@@ -960,30 +965,34 @@ function makeResultTable(rows){
 function renderResult(data){
   var status=document.getElementById('result-status');
   var body=document.getElementById('result-body');
+  var ms=data.compute_time_ms;
+  var timeBadge=ms!==undefined?'<span style="background:rgba(16,185,129,.12);color:var(--success);font-size:10px;padding:2px 7px;border-radius:10px;border:1px solid rgba(16,185,129,.25);font-family:var(--font-mono);margin-left:10px">&#x23F1; '+ms+' ms</span>':'';
   if(data.success){
     status.style.borderColor='';
     status.innerHTML='<span class="status-icon h-ok">&#x2713;</span>'+
-      '<div><div class="status-cmd">> :'+escHtml(data.command)+'&nbsp;&nbsp;'+
-      '<span style="color:var(--text-dim);font-size:12px;font-family:var(--font-sans)">&#x2192; :'+escHtml(data.solver)+'</span></div>'+
+      '<div style="flex:1"><div class="status-cmd">> :'+escHtml(data.command)+'&nbsp;'+
+      '<span style="color:var(--text-dim);font-size:12px;font-family:var(--font-sans)">&#x2192; :'+escHtml(data.solver)+'</span>'+timeBadge+'</div>'+
       '<div class="status-msg">&#x270E; '+escHtml(data.message)+'</div></div>';
     body.innerHTML=makeResultTable(data.rows);
-  }else{showError(':'+data.command+'\n\n'+data.message);}
+  }else{showError(':'+data.command+'\n\n'+data.message,timeBadge);}
 }
 
-function renderChainResults(results){
+function renderChainResults(results,totalMs){
   var status=document.getElementById('result-status');
   var body=document.getElementById('result-body');
   var allOk=results.every(function(d){return d.success;});
+  var timeBadge=totalMs!==undefined?'<span style="background:rgba(16,185,129,.12);color:var(--success);font-size:10px;padding:2px 7px;border-radius:10px;border:1px solid rgba(16,185,129,.25);font-family:var(--font-mono);margin-left:10px">&#x23F1; '+totalMs+' ms</span>':'';
   status.style.borderColor=allOk?'':'var(--error)';
   status.innerHTML='<span class="status-icon '+(allOk?'h-chain':'h-err')+'">'+(allOk?'&#x2713;':'&#x2717;')+'</span>'+
-    '<div><div class="status-cmd">Pipeline &mdash; '+results.length+' steps</div>'+
+    '<div style="flex:1"><div class="status-cmd">Pipeline &mdash; '+results.length+' steps'+timeBadge+'</div>'+
     '<div class="status-msg">'+(allOk?'All steps completed.':'One or more steps failed.')+'</div></div>';
   var html='';
   results.forEach(function(d,i){
+    var stepMs=d.compute_time_ms!==undefined?'<span style="color:var(--text-dim);font-size:10px;font-family:var(--font-mono);margin-left:8px">&#x23F1; '+d.compute_time_ms+' ms</span>':'';
     html+='<div class="chain-result-block">'+
       '<div class="chain-result-header">'+(d.success?'&#x2713;':'&#x2717;')+
       '  Step '+(i+1)+' &mdash; :'+escHtml(d.command)+
-      '&nbsp;&nbsp;<span style="font-weight:400;color:var(--text-dim)">:: '+escHtml(d.solver)+'</span></div>'+
+      '&nbsp;&nbsp;<span style="font-weight:400;color:var(--text-dim)">:: '+escHtml(d.solver)+'</span>'+stepMs+'</div>'+
       '<div style="padding:12px 16px">';
     if(d.success&&d.rows.length>0){html+=makeResultTable(d.rows);}
     else if(!d.success){html+='<div style="color:var(--error);font-size:12px">'+escHtml(d.message)+'</div>';}
@@ -992,11 +1001,12 @@ function renderChainResults(results){
   body.innerHTML=html;
 }
 
-function showError(msg){
+function showError(msg,timeBadge){
+  var tb=timeBadge||'';
   var status=document.getElementById('result-status');
   status.style.borderColor='var(--error)';
   status.innerHTML='<span class="status-icon h-err">&#x2717;</span>'+
-    '<span style="color:var(--error);font-family:var(--font-mono);font-size:12px">'+escHtml(msg)+'</span>';
+    '<div style="flex:1"><div style="color:var(--error);font-family:var(--font-mono);font-size:12px">'+escHtml(msg)+'</div>'+tb+'</div>';
   document.getElementById('result-body').innerHTML='';
 }
 
@@ -1097,10 +1107,12 @@ function clearAll(){
   }
 }
 
-function updateStatus(cmd){
+function updateStatus(cmd,ms){
   document.getElementById('s-queries').textContent='Queries: '+queryCount;
   document.getElementById('s-errors').textContent='Errors: '+errorCount;
   document.getElementById('s-last').textContent='Last: '+(cmd||'none');
+  var timeEl=document.getElementById('s-time');
+  if(timeEl&&ms!==undefined){timeEl.textContent='Time: '+ms+' ms';}
 }
 
 document.getElementById('cmd').addEventListener('keydown',function(e){
@@ -1126,6 +1138,7 @@ function handle_solvers(req::HTTP.Request)
 end
 
 function handle_solve(req::HTTP.Request)
+    t0 = time_ns()
     try
         req_data = parse_request(String(req.body))
         mode     = get(req_data, "mode", "command")
@@ -1144,13 +1157,17 @@ function handle_solve(req::HTTP.Request)
             isempty(strip(query_str)) && error("Empty query.")
             res = process(query_str, _state)
         end
+        elapsed_ms = round((time_ns() - t0) / 1_000_000, digits=2)
         d = result_to_dict(res)
-        d["plot_data"] = extract_plot_data(res)
+        d["plot_data"]       = extract_plot_data(res)
+        d["compute_time_ms"] = elapsed_ms
         HTTP.Response(200, ["Content-Type" => "application/json"], to_json(d))
     catch e
+        elapsed_ms = round((time_ns() - t0) / 1_000_000, digits=2)
         HTTP.Response(500, ["Content-Type" => "application/json"],
             to_json(Dict("success"=>false,"command"=>"unknown","solver"=>"server",
                          "message"=>sprint(showerror,e),"rows"=>Dict[],
+                         "compute_time_ms"=>elapsed_ms,
                          "plot_data"=>Dict("available"=>false,"labels"=>[],"values"=>[],
                                            "units"=>[],"title"=>"","type"=>"bar","note"=>""))))
     end
@@ -1205,8 +1222,17 @@ function handle_chain(req::HTTP.Request)
             end
         end
 
+        t0_chain = time_ns()
         results = execute_chain(steps)
-        HTTP.Response(200, ["Content-Type" => "application/json"], to_json(results))
+        total_ms = round((time_ns() - t0_chain) / 1_000_000, digits=2)
+        # Attach compute_time_ms to each result dict
+        for d in results
+            if !haskey(d, "compute_time_ms")
+                d["compute_time_ms"] = 0.0
+            end
+        end
+        HTTP.Response(200, ["Content-Type" => "application/json"],
+            to_json(Dict("results"=>results, "total_ms"=>total_ms)))
     catch e
         HTTP.Response(500, ["Content-Type" => "application/json"],
             to_json([Dict("step_id"=>"chain","success"=>false,"command"=>"chain",
